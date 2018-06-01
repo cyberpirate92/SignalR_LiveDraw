@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Live Draw</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.1/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.css">
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@aspnet/signalr@1.0.0/dist/browser/signalr.min.js"></script>
+    <script src="//cdn.jsdelivr.net/chartist.js/latest/chartist.min.js"></script>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col">
+                Number of users: <span id="userCountView">0</span>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col">
+                <canvas id="drawingCanvas" class="border">
+                </canvas>
+            </div>
+            <div class="col">
+                <ul id="userActivityView" class="list-group">
+                </ul>
+                <div class="input-group mb-3">                
+                    <input type="text" class="form-control" placeholder="Send Message.." id="chatMessageText">
+                    <div class="input-group-append">
+                        <button class="btn btn-outline-primary" id="chatMessageSendBtn" type="button">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col" id="chartArea">
+
+            </div>
+        </div>
+    </div>
+</body>
+<script>
+    var userCountView = $("#userCountView");
+    var userActivityView = $("#userActivityView");
+
+    var connection = new signalR.HubConnectionBuilder()
+        .withUrl("/positionHub")
+        .configureLogging(signalR.LogLevel.Debug)
+        .build();
+
+    connection.on("ReceivePoint", (xPos, yPos) => {
+        drawingContext.fillStyle = "red";
+        drawingContext.fillRect(xPos, yPos, 5, 5);
+    });
+
+    connection.on("UserConnected", (userCount, username) => {
+        userCountView.text(userCount);
+        userActivityView.append(`<li class="list-group-item list-group-item-success"><small class="text-muted">${getCurrentTimestamp()}</small> <strong>${username}</strong> has joined</li>`);
+        addToChart(userCount);
+    });
+
+    connection.on("UserDisconnected", (userCount, username) => {
+        userCountView.text(userCount)
+        userActivityView.append(`<li class="list-group-item list-group-item-danger"><small class="text-muted">${getCurrentTimestamp()}</small> <strong>${username}</strong> has left</li>`);
+        addToChart(userCount);
+    });
+
+    connection.on("ReceiveChatMessage", (message, username) => {
+        userActivityView.append(`<li class="list-group-item"><small class="text-muted">${getCurrentTimestamp()}</small> <strong>${username}</strong>: ${message}`);
+    });
+
+    connection.start();
+
+    var drawingCanvas = document.getElementById("drawingCanvas");
+    var drawingContext = drawingCanvas.getContext('2d');
+    var isLocked = false;
+    var chart = new Chartist.Line('#chartArea', {
+            labels: [],
+            series: [[]]
+        }, 
+        {
+            low: 0,
+            showArea: true
+        });
+    
+    var addToChart = function(value) {
+        if (isNaN(value)) return;
+        chart.data.series[0].push(value);
+        chart.update();
+    }
+
+    $(document).ready( () => {
+        fitToContainer(drawingCanvas);
+    });
+
+    $("#chatMessageSendBtn").on("click", () => {
+        const message = $("#chatMessageText").val();
+        if (message) {
+            connection.invoke("SendChatMessage", message).catch(error => console.log(error));
+            $("#chatMessageText").val("");
+        }
+    });
+
+    drawingCanvas.addEventListener('click', (event) => {
+        isLocked = !isLocked;
+    });
+
+    drawingCanvas.addEventListener('mousemove', (event) => {
+        if (isLocked)
+            broadcastPosition(event.clientX, event.clientY);
+    });
+
+    drawingCanvas.addEventListener('mouseleave', (event) => {
+        isLocked = false;
+    });
+
+    var broadcastPosition = async function (xPos, yPos) {
+        await connection.invoke("SendPoint", xPos, yPos);
+    }
+
+    var fitToContainer = function (canvas){
+        // Make it visually fill the positioned parent
+        canvas.style.width ='100%';
+        canvas.style.height='100%';
+        // ...then set the internal size to match
+        canvas.width  = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+    }
+
+    var getCurrentTimestamp = function() {
+        const date = new Date();
+        return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+    }
+</script>
+
+</html>
